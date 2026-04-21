@@ -6,10 +6,10 @@ export async function POST(req: NextRequest) {
   const messages = body.messages || [];
   const content = messages[messages.length - 1]?.content || "";
 
-  // 👉 用户选择的模型（可以无视）
+  // 👉 用户前端选择（仅参考，不决定最终）
   const fakeModel = body.model;
 
-  // 👉 模型映射（后续扩展用）
+  // 👉 模型映射（可扩展）
   const modelMap: Record<string, string> = {
     "gpt-4": "deepseek-chat",
     "gpt-4o": "deepseek-chat",
@@ -18,12 +18,12 @@ export async function POST(req: NextRequest) {
   };
 
   // =========================
-  // 🧠 自动调度核心（重点）
+  // 🧠 自动调度逻辑
   // =========================
 
   let realModel = "deepseek-chat"; // 默认高质量
 
-  // 👉 1. 超短内容 → 走 Qwen（省钱）
+  // 👉 短内容 → Qwen（省钱）
   if (
     content.length < 50 &&
     !content.includes("写") &&
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     realModel = "qwen-turbo";
   }
 
-  // 👉 2. 长文本 / 写作 → DeepSeek
+  // 👉 长内容 / 写作 → DeepSeek
   if (
     content.length > 2000 ||
     content.includes("写作") ||
@@ -42,11 +42,14 @@ export async function POST(req: NextRequest) {
     realModel = "deepseek-chat";
   }
 
-  // 👉 3. 未来可扩展（比如VIP强制高端模型）
-  // if (user?.vip) realModel = "deepseek-chat";
-
-  // ❗核心修复：不再完全受 fakeModel 控制
+  // ❗最终模型（不完全受前端控制）
   const finalModel = realModel || modelMap[fakeModel];
+
+  // =========================
+  // 🔥 日志（关键！）
+  // =========================
+  console.log("🔥 当前模型:", finalModel);
+  console.log("📩 用户内容:", content);
 
   try {
     let response;
@@ -93,8 +96,15 @@ export async function POST(req: NextRequest) {
 
     const data = await response.json();
 
-    return Response.json(data);
+    // 👉 返回时附带模型（可选）
+    return Response.json({
+      ...data,
+      _model: finalModel,
+    });
+
   } catch (err) {
+    console.error("❌ 请求失败:", err);
+
     return Response.json({
       error: "API request failed",
       detail: String(err),
