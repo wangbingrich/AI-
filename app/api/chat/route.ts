@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 
-// CORS
+// ===== CORS（必须）=====
 export async function OPTIONS() {
   return new Response(null, {
     headers: {
@@ -16,14 +16,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+
     const messages = body.messages || [];
     const content = messages[messages.length - 1]?.content || "";
 
     // =========================
-    // 🧠 自动调度
+    // 🧠 自动调度逻辑
     // =========================
     if (content.length < 50) {
-      finalModel = "qwen-plus"; // 🔥 改这里
+      finalModel = "qwen-turbo";
     }
 
     if (content.includes("写") || content.includes("文章")) {
@@ -31,16 +32,17 @@ export async function POST(req: NextRequest) {
     }
 
     console.log("🔥 当前模型:", finalModel);
+    console.log("📩 内容:", content);
 
     let response;
 
     // =========================
-    // 🟡 Qwen（重点调试）
+    // 🟡 Qwen（稳定版写法）
     // =========================
-    if (finalModel === "qwen-plus") {
+    if (finalModel === "qwen-turbo") {
       try {
         const res = await fetch(
-          "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+          "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
           {
             method: "POST",
             headers: {
@@ -48,23 +50,34 @@ export async function POST(req: NextRequest) {
               Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
             },
             body: JSON.stringify({
-              model: "qwen-plus",
-              messages,
+              model: "qwen-turbo",
+              input: {
+                messages,
+              },
             }),
           }
         );
 
-        const text = await res.text(); // 🔥 关键：先拿原始返回
-        console.log("🟡 Qwen原始返回:", text);
-
         if (!res.ok) {
-          throw new Error("Qwen HTTP错误: " + text);
+          throw new Error("Qwen HTTP error");
         }
 
+        const data = await res.json();
+
+        // 👉 转换为 OpenAI 格式（关键！）
         return new Response(
           JSON.stringify({
-            ...JSON.parse(text),
-            _model: "qwen-plus",
+            choices: [
+              {
+                message: {
+                  content:
+                    data?.output?.text ||
+                    data?.output?.choices?.[0]?.message?.content ||
+                    "Qwen返回为空",
+                },
+              },
+            ],
+            _model: "qwen-turbo",
           }),
           {
             headers: {
@@ -73,11 +86,9 @@ export async function POST(req: NextRequest) {
             },
           }
         );
-
       } catch (err) {
-        console.log("❌ Qwen彻底失败:", err);
+        console.log("⚠️ Qwen失败 → 自动切DeepSeek");
 
-        // 👉 fallback
         finalModel = "deepseek-chat";
       }
     }
@@ -85,7 +96,7 @@ export async function POST(req: NextRequest) {
     // =========================
     // 🔵 DeepSeek（兜底）
     // =========================
-    const dsRes = await fetch(
+    response = await fetch(
       "https://api.deepseek.com/v1/chat/completions",
       {
         method: "POST",
@@ -100,12 +111,12 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    const dsData = await dsRes.json();
+    const data = await response.json();
 
     return new Response(
       JSON.stringify({
-        ...dsData,
-        _model: "deepseek-chat",
+        ...data,
+        _model: finalModel,
       }),
       {
         headers: {
@@ -114,7 +125,6 @@ export async function POST(req: NextRequest) {
         },
       }
     );
-
   } catch (err) {
     return new Response(
       JSON.stringify({
